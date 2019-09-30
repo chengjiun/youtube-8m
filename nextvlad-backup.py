@@ -1,4 +1,6 @@
 from frame_level_models import *
+import tensorflow as tf
+import tensorflow.contrib.slim as slim
 
 flags.DEFINE_integer(
     "nextvlad_cluster_size", 64, "Number of units in the NeXtVLAD cluster layer."
@@ -120,12 +122,6 @@ class NeXtVLADModel(models.BaseModel):
       vocab_size: The number of classes in the dataset.
       num_frames: A vector of length 'batch' which indicates the number of
            frames for each video (before padding).
-      iterations: the number of frames to be sampled.
-      add_batch_norm: whether to add batch norm during training.
-      sample_random_frames: whether to sample random frames or random sequences.
-      cluster_size: the output neuron number of the cluster layer.
-      hidden_size: the output neuron number of the hidden layer.
-      is_training: whether to build the graph in training mode.
     Returns:
       A dictionary with a tensor containing the probability predictions of the
       model in the 'predictions' key. The dimensions of the tensor are
@@ -137,9 +133,6 @@ class NeXtVLADModel(models.BaseModel):
         model_input,
         vocab_size,
         num_frames,
-        iterations=None,
-        add_batch_norm=None,
-        sample_random_frames=None,
         cluster_size=None,
         hidden_size=None,
         is_training=True,
@@ -149,9 +142,6 @@ class NeXtVLADModel(models.BaseModel):
         gating_reduction=None,
         **unused_params
     ):
-        iterations = iterations or FLAGS.iterations
-        add_batch_norm = add_batch_norm or FLAGS.dbof_add_batch_norm
-        random_frames = sample_random_frames or FLAGS.sample_random_frames
         cluster_size = cluster_size or FLAGS.nextvlad_cluster_size
         hidden1_size = hidden_size or FLAGS.nextvlad_hidden_size
         gating_reduction = gating_reduction or FLAGS.gating_reduction
@@ -159,29 +149,8 @@ class NeXtVLADModel(models.BaseModel):
         drop_rate = drop_rate or FLAGS.drop_rate
         expansion = expansion or FLAGS.expansion
 
-        num_frames = tf.cast(tf.expand_dims(num_frames, 1), tf.float32)
-        if random_frames:
-            model_input = utils.SampleRandomFrames(model_input, num_frames, iterations)
-        else:
-            model_input = utils.SampleRandomSequence(
-                model_input, num_frames, iterations
-            )
-
-        # mask = tf.sequence_mask(num_frames, 300, dtype=tf.float32)
+        mask = tf.sequence_mask(num_frames, 300, dtype=tf.float32)
         max_frames = model_input.get_shape().as_list()[1]
-        feature_size = model_input.get_shape().as_list()[2]
-        reshaped_input = tf.reshape(model_input, [-1, feature_size])
-        tf.compat.v1.summary.histogram("input_hist", reshaped_input)
-
-        if add_batch_norm:
-            reshaped_input = slim.batch_norm(
-                reshaped_input,
-                center=True,
-                scale=True,
-                is_training=is_training,
-                scope="input_bn",
-            )
-
         video_nextvlad = NeXtVLAD(
             1024,
             max_frames,

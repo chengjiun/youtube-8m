@@ -119,7 +119,7 @@ class AveragePrecisionCalculator(object):
     if not num_positives is None:
       self._total_positives += num_positives
     else:
-      self._total_positives += numpy.size(numpy.where(actuals > 0))
+      self._total_positives += numpy.size(numpy.where(actuals > 1e-5))
     topk = self._top_n
     heap = self._heap
 

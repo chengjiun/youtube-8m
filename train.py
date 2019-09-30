@@ -16,7 +16,6 @@
 import json
 import os
 import time
-import numpy as np
 
 import eval_util
 import export_model
@@ -27,6 +26,7 @@ import video_level_models
 import readers
 import tensorflow as tf
 import tensorflow.contrib.slim as slim
+from tensorflow.python.lib.io import file_io
 from tensorflow import app
 from tensorflow import flags
 from tensorflow import gfile
@@ -38,73 +38,104 @@ FLAGS = flags.FLAGS
 
 if __name__ == "__main__":
     # Dataset flags.
-    flags.DEFINE_string("train_dir", "/tmp/yt8m_model/",
-                        "The directory to save the model files in.")
     flags.DEFINE_string(
-        "train_data_pattern", "",
+        "train_dir", "/tmp/yt8m_model/", "The directory to save the model files in."
+    )
+    flags.DEFINE_string(
+        "train_data_pattern",
+        "",
         "File glob for the training dataset. If the files refer to Frame Level "
         "features (i.e. tensorflow.SequenceExample), then set --reader_type "
         "format. The (Sequence)Examples are expected to have 'rgb' byte array "
-        "sequence feature as well as a 'labels' int64 context feature.")
-    flags.DEFINE_string("feature_names", "mean_rgb", "Name of the feature "
-                                                     "to use for training.")
+        "sequence feature as well as a 'labels' int64 context feature.",
+    )
+    flags.DEFINE_string(
+        "feature_names", "mean_rgb", "Name of the feature " "to use for training."
+    )
     flags.DEFINE_string("feature_sizes", "1024", "Length of the feature vectors.")
 
     # Model flags.
     flags.DEFINE_bool(
-        "frame_features", False,
+        "frame_features",
+        False,
         "If set, then --train_data_pattern must be frame-level features. "
         "Otherwise, --train_data_pattern must be aggregated video-level "
         "features. The model must also be set appropriately (i.e. to read 3D "
-        "batches VS 4D batches.")
+        "batches VS 4D batches.",
+    )
     flags.DEFINE_string(
-        "model", "LogisticModel",
-        "Which architecture to use for the model. Models are defined "
-        "in models.py.")
+        "model",
+        "LogisticModel",
+        "Which architecture to use for the model. Models are defined " "in models.py.",
+    )
     flags.DEFINE_bool(
-        "start_new_model", False,
+        "start_new_model",
+        False,
         "If set, this will not resume from a checkpoint and will instead create a"
-        " new model instance.")
+        " new model instance.",
+    )
 
     # Training flags.
-    flags.DEFINE_integer("num_gpu", 1,
-                         "The maximum number of GPU devices to use for training. "
-                         "Flag only applies if GPUs are installed")
-    flags.DEFINE_integer("batch_size", 1024,
-                         "How many examples to process per batch for training.")
-    flags.DEFINE_string("label_loss", "CrossEntropyLoss",
-                        "Which loss function to use for training the model.")
+    flags.DEFINE_integer(
+        "num_gpu",
+        1,
+        "The maximum number of GPU devices to use for training. "
+        "Flag only applies if GPUs are installed",
+    )
+    flags.DEFINE_integer(
+        "batch_size", 512, "How many examples to process per batch for training."
+    )
+    flags.DEFINE_string(
+        "label_loss",
+        "CrossEntropyLoss",
+        "Which loss function to use for training the model.",
+    )
     flags.DEFINE_float(
-        "regularization_penalty", 1.0,
+        "regularization_penalty",
+        1.0,
         "How much weight to give to the regularization loss (the label loss has "
-        "a weight of 1).")
-    flags.DEFINE_float("base_learning_rate", 0.01,
-                       "Which learning rate to start with.")
-    flags.DEFINE_float("learning_rate_decay", 0.95,
-                       "Learning rate decay factor to be applied every "
-                       "learning_rate_decay_examples.")
-    flags.DEFINE_float("learning_rate_decay_examples", 4000000,
-                       "Multiply current learning rate by learning_rate_decay "
-                       "every learning_rate_decay_examples.")
-    flags.DEFINE_integer("num_epochs", 5,
-                         "How many passes to make over the dataset before "
-                         "halting training.")
-    flags.DEFINE_integer("max_steps", None,
-                         "The maximum number of iterations of the training loop.")
-    flags.DEFINE_integer("export_model_steps", 10000,
-                         "The period, in number of steps, with which the model "
-                         "is exported for batch prediction.")
+        "a weight of 1).",
+    )
+    flags.DEFINE_float("base_learning_rate", 0.01, "Which learning rate to start with.")
+    flags.DEFINE_float(
+        "learning_rate_decay",
+        0.95,
+        "Learning rate decay factor to be applied every "
+        "learning_rate_decay_examples.",
+    )
+    flags.DEFINE_float(
+        "learning_rate_decay_examples",
+        4000000,
+        "Multiply current learning rate by learning_rate_decay "
+        "every learning_rate_decay_examples.",
+    )
+    flags.DEFINE_integer(
+        "num_epochs",
+        5,
+        "How many passes to make over the dataset before " "halting training.",
+    )
+    flags.DEFINE_integer(
+        "max_steps", None, "The maximum number of iterations of the training loop."
+    )
+    flags.DEFINE_integer(
+        "export_model_steps",
+        200,
+        "The period, in number of steps, with which the model "
+        "is exported for batch prediction.",
+    )
 
     # Other flags.
-    flags.DEFINE_integer("num_readers", 8,
-                         "How many threads to use for reading input files.")
-    flags.DEFINE_string("optimizer", "AdamOptimizer",
-                        "What optimizer class to use.")
+    flags.DEFINE_integer(
+        "num_readers", 8, "How many threads to use for reading input files."
+    )
+    flags.DEFINE_string("optimizer", "AdamOptimizer", "What optimizer class to use.")
     flags.DEFINE_float("clip_gradient_norm", 1.0, "Norm to clip gradients to.")
     flags.DEFINE_bool(
-        "log_device_placement", False,
+        "log_device_placement",
+        False,
         "Whether to write the device on which every op will run into the "
-        "logs on startup.")
+        "logs on startup.",
+    )
 
 
 def validate_class_name(flag_value, category, modules, expected_superclass):
@@ -129,18 +160,17 @@ def validate_class_name(flag_value, category, modules, expected_superclass):
         if not candidate:
             continue
         if not issubclass(candidate, expected_superclass):
-            raise flags.FlagsError("%s '%s' doesn't inherit from %s." %
-                                   (category, flag_value,
-                                    expected_superclass.__name__))
+            raise flags.FlagsError(
+                "%s '%s' doesn't inherit from %s."
+                % (category, flag_value, expected_superclass.__name__)
+            )
         return True
     raise flags.FlagsError("Unable to find %s '%s'." % (category, flag_value))
 
 
-def get_input_data_tensors(reader,
-                           data_pattern,
-                           batch_size=1000,
-                           num_epochs=None,
-                           num_readers=1):
+def get_input_data_tensors(
+    reader, data_pattern, batch_size=1000, num_epochs=None, num_readers=1
+):
     """Creates the section of the graph which reads the training data.
 
     Args:
@@ -163,11 +193,13 @@ def get_input_data_tensors(reader,
     with tf.name_scope("train_input"):
         files = gfile.Glob(data_pattern)
         if not files:
-            raise IOError("Unable to find training files. data_pattern='" +
-                          data_pattern + "'.")
+            raise IOError(
+                "Unable to find training files. data_pattern='" + data_pattern + "'."
+            )
         logging.info("Number of training files: %s.", str(len(files)))
         filename_queue = tf.train.string_input_producer(
-            files, num_epochs=num_epochs, shuffle=True)
+            files, num_epochs=num_epochs, shuffle=True
+        )
         training_data = [
             reader.prepare_reader(filename_queue) for _ in range(num_readers)
         ]
@@ -178,7 +210,8 @@ def get_input_data_tensors(reader,
             capacity=batch_size * 5,
             min_after_dequeue=batch_size,
             allow_smaller_final_batch=False,
-            enqueue_many=True)
+            enqueue_many=True,
+        )
 
 
 def find_class_by_name(name, modules):
@@ -187,19 +220,21 @@ def find_class_by_name(name, modules):
     return next(a for a in modules if a)
 
 
-def build_graph(reader,
-                model,
-                train_data_pattern,
-                label_loss_fn=losses.CrossEntropyLoss(),
-                batch_size=1000,
-                base_learning_rate=0.01,
-                learning_rate_decay_examples=1000000,
-                learning_rate_decay=0.95,
-                optimizer_class=tf.train.AdamOptimizer,
-                clip_gradient_norm=1.0,
-                regularization_penalty=1,
-                num_readers=1,
-                num_epochs=None):
+def build_graph(
+    reader,
+    model,
+    train_data_pattern,
+    label_loss_fn=losses.CrossEntropyLoss(),
+    batch_size=1000,
+    base_learning_rate=0.01,
+    learning_rate_decay_examples=1000000,
+    learning_rate_decay=0.95,
+    optimizer_class=tf.train.AdamOptimizer,
+    clip_gradient_norm=1.0,
+    regularization_penalty=1,
+    num_readers=1,
+    num_epochs=None,
+):
     """Creates the Tensorflow graph.
 
     This will only be called once in the life of
@@ -227,45 +262,58 @@ def build_graph(reader,
     global_step = tf.Variable(0, trainable=False, name="global_step")
 
     local_device_protos = device_lib.list_local_devices()
-    gpus = [x.name for x in local_device_protos if x.device_type == 'GPU']
-    gpus = gpus[:FLAGS.num_gpu]
+    gpus = [x.name for x in local_device_protos if x.device_type == "GPU"]
+    gpus = gpus[: FLAGS.num_gpu]
     num_gpus = len(gpus)
 
     if num_gpus > 0:
         logging.info("Using the following GPUs to train: " + str(gpus))
         num_towers = num_gpus
-        device_string = '/gpu:%d'
+        device_string = "/gpu:%d"
     else:
         logging.info("No GPUs found. Training on CPU.")
         num_towers = 1
-        device_string = '/cpu:%d'
+        device_string = "/cpu:%d"
 
     learning_rate = tf.train.exponential_decay(
         base_learning_rate,
         global_step * batch_size * num_towers,
         learning_rate_decay_examples,
         learning_rate_decay,
-        staircase=True)
-    tf.summary.scalar('learning_rate', learning_rate)
+        staircase=True,
+    )
+    tf.summary.scalar("learning_rate", learning_rate)
 
     optimizer = optimizer_class(learning_rate)
-    unused_video_id, model_input_raw, labels_batch, num_frames = (
-        get_input_data_tensors(
-            reader,
-            train_data_pattern,
-            batch_size=batch_size * num_towers,
-            num_readers=num_readers,
-            num_epochs=num_epochs))
+    input_data_dict = get_input_data_tensors(
+        reader,
+        train_data_pattern,
+        batch_size=batch_size * num_towers,
+        num_readers=num_readers,
+        num_epochs=num_epochs,
+    )
+    model_input_raw = input_data_dict["video_matrix"]
+    labels_batch = input_data_dict["labels"]
+    num_frames = input_data_dict["num_frames"]
+    # xxx 2018 - ori
+    # unused_video_id, model_input_raw, labels_batch, num_frames = (
+    #     get_input_data_tensors(
+    #         reader,
+    #         train_data_pattern,
+    #         batch_size=batch_size * num_towers,
+    #         num_readers=num_readers,
+    #         num_epochs=num_epochs))
+    print("model_input_shape, ", model_input_raw.shape)
     tf.summary.histogram("model/input_raw", model_input_raw)
-    # feature_dim = len(model_input_raw.get_shape()) - 1
+    # xxx 2018 - ori
+    # offset = np.array([4./512] * 1024 + [0]*128)
+    # offset = tf.constant(offset, dtype=tf.float32)
+    # eigen_val = tf.constant(np.sqrt(np.load("yt8m_pca/eigenvals.npy")[:1024, 0]), dtype=tf.float32)
+    # model_input = tf.multiply(model_input_raw - offset,  tf.pad(eigen_val + 1e-4, [[0, 128]], constant_values=1.))
+    # xxx
+    feature_dim = len(model_input_raw.get_shape()) - 1
 
-    offset = np.array([4./512] * 1024 + [0]*128)
-    offset = tf.constant(offset, dtype=tf.float32)
-
-    eigen_val = tf.constant(np.sqrt(np.load("yt8m_pca/eigenvals.npy")[:1024, 0]), dtype=tf.float32)
-
-    model_input = tf.multiply(model_input_raw - offset,  tf.pad(eigen_val + 1e-4, [[0, 128]], constant_values=1.))
-    # model_input = tf.nn.l2_normalize(model_input_raw, feature_dim)
+    model_input = tf.nn.l2_normalize(model_input_raw, feature_dim)
 
     tower_inputs = tf.split(model_input, num_towers)
     tower_labels = tf.split(labels_batch, num_towers)
@@ -280,12 +328,17 @@ def build_graph(reader,
         with tf.device(device_string % i):
             with (tf.variable_scope(("tower"), reuse=True if i > 0 else None)):
                 with (
-                slim.arg_scope([slim.model_variable, slim.variable], device="/cpu:0" if num_gpus != 1 else "/gpu:0")):
+                    slim.arg_scope(
+                        [slim.model_variable, slim.variable],
+                        device="/cpu:0" if num_gpus != 1 else "/gpu:0",
+                    )
+                ):
                     result = model.create_model(
                         tower_inputs[i],
                         num_frames=tower_num_frames[i],
                         vocab_size=reader.num_classes,
-                        labels=tower_labels[i])
+                        labels=tower_labels[i],
+                    )
                     # for variable in slim.get_model_variables():
                     #     tf.summary.histogram(variable.op.name, variable)
 
@@ -295,10 +348,14 @@ def build_graph(reader,
                     if "loss" in result.keys():
                         label_loss = result["loss"]
                     else:
-                        label_loss = label_loss_fn.calculate_loss(predictions, tower_labels[i])
+                        label_loss = label_loss_fn.calculate_loss(
+                            predictions, tower_labels[i]
+                        )
                         if "aux_predictions" in result.keys():
                             for pred in result["aux_predictions"]:
-                                label_loss += label_loss_fn.calculate_loss(pred, tower_labels[i])
+                                label_loss += label_loss_fn.calculate_loss(
+                                    pred, tower_labels[i]
+                                )
 
                     if "regularization_loss" in result.keys():
                         reg_loss = result["regularization_loss"]
@@ -326,8 +383,9 @@ def build_graph(reader,
 
                     # Incorporate the L2 weight penalties etc.
                     final_loss = regularization_penalty * reg_loss + label_loss
-                    gradients = optimizer.compute_gradients(final_loss,
-                                                            colocate_gradients_with_ops=False)
+                    gradients = optimizer.compute_gradients(
+                        final_loss, colocate_gradients_with_ops=False
+                    )
                     tower_gradients.append(gradients)
     label_loss = tf.reduce_mean(tf.stack(tower_label_losses))
     tf.summary.scalar("label_loss", label_loss)
@@ -337,8 +395,10 @@ def build_graph(reader,
     merged_gradients = utils.combine_gradients(tower_gradients)
 
     if clip_gradient_norm > 0:
-        with tf.name_scope('clip_grads'):
-            merged_gradients = utils.clip_gradient_norms(merged_gradients, clip_gradient_norm)
+        with tf.name_scope("clip_grads"):
+            merged_gradients = utils.clip_gradient_norms(
+                merged_gradients, clip_gradient_norm
+            )
 
     train_op = optimizer.apply_gradients(merged_gradients, global_step=global_step)
 
@@ -355,9 +415,18 @@ def build_graph(reader,
 class Trainer(object):
     """A Trainer to train a Tensorflow graph."""
 
-    def __init__(self, cluster, task, train_dir, model, reader, model_exporter,
-                 log_device_placement=True, max_steps=None,
-                 export_model_steps=10000):
+    def __init__(
+        self,
+        cluster,
+        task,
+        train_dir,
+        model,
+        reader,
+        model_exporter,
+        log_device_placement=True,
+        max_steps=None,
+        export_model_steps=10000,
+    ):
         """"Creates a Trainer.
 
         Args:
@@ -368,10 +437,12 @@ class Trainer(object):
 
         self.cluster = cluster
         self.task = task
-        self.is_master = (task.type == "master" and task.index == 0)
+        self.is_master = task.type == "master" and task.index == 0
         self.train_dir = train_dir
         self.config = tf.ConfigProto(
-            allow_soft_placement=True, log_device_placement=log_device_placement)
+            allow_soft_placement=True, log_device_placement=log_device_placement
+        )
+        self.config.gpu_options.allow_growth = True
         self.model = model
         self.reader = reader
         self.model_exporter = model_exporter
@@ -404,19 +475,21 @@ class Trainer(object):
             "label_loss": FLAGS.label_loss,
         }
         flags_json_path = os.path.join(FLAGS.train_dir, "model_flags.json")
-        if os.path.exists(flags_json_path):
-            existing_flags = json.load(open(flags_json_path))
+        if file_io.file_exists(flags_json_path):
+            existing_flags = json.load(file_io.FileIO(flags_json_path, mode="r"))
             if existing_flags != model_flags_dict:
-                logging.error("Model flags do not match existing file %s. Please "
-                              "delete the file, change --train_dir, or pass flag "
-                              "--start_new_model",
-                              flags_json_path)
+                logging.error(
+                    "Model flags do not match existing file %s. Please "
+                    "delete the file, change --train_dir, or pass flag "
+                    "--start_new_model",
+                    flags_json_path,
+                )
                 logging.error("Ran model with flags: %s", str(model_flags_dict))
                 logging.error("Previously ran with flags: %s", str(existing_flags))
                 exit(1)
         else:
             # Write the file.
-            with open(flags_json_path, "w") as fout:
+            with file_io.FileIO(flags_json_path, mode="w") as fout:
                 fout.write(json.dumps(model_flags_dict))
 
         target, device_fn = self.start_server_if_distributed()
@@ -444,9 +517,10 @@ class Trainer(object):
             init_op=init_op,
             is_chief=self.is_master,
             global_step=global_step,
-            save_model_secs=60 * 60,
+            save_model_secs=15 * 60,
             save_summaries_secs=120,
-            saver=saver)
+            saver=saver,
+        )
 
         logging.info("%s: Starting managed session.", task_as_string(self.task))
         with sv.managed_session(target, config=self.config) as sess:
@@ -455,7 +529,8 @@ class Trainer(object):
                 while (not sv.should_stop()) and (not self.max_steps_reached):
                     batch_start_time = time.time()
                     _, global_step_val, loss_val, predictions_val, labels_val = sess.run(
-                        [train_op, global_step, loss, predictions, labels])
+                        [train_op, global_step, loss, predictions, labels]
+                    )
                     seconds_per_batch = time.time() - batch_start_time
                     examples_per_second = labels_val.shape[0] / seconds_per_batch
 
@@ -464,44 +539,78 @@ class Trainer(object):
 
                     if self.is_master and global_step_val % 10 == 0 and self.train_dir:
                         eval_start_time = time.time()
-                        hit_at_one = eval_util.calculate_hit_at_one(predictions_val, labels_val)
-                        perr = eval_util.calculate_precision_at_equal_recall_rate(predictions_val,
-                                                                                  labels_val)
+                        hit_at_one = eval_util.calculate_hit_at_one(
+                            predictions_val, labels_val
+                        )
+                        perr = eval_util.calculate_precision_at_equal_recall_rate(
+                            predictions_val, labels_val
+                        )
                         gap = eval_util.calculate_gap(predictions_val, labels_val)
                         eval_end_time = time.time()
                         eval_time = eval_end_time - eval_start_time
 
-                        logging.info("training step " + str(global_step_val) + " | Loss: " + ("%.2f" % loss_val) +
-                                     " Examples/sec: " + ("%.2f" % examples_per_second) + " | Hit@1: " +
-                                     ("%.2f" % hit_at_one) + " PERR: " + ("%.2f" % perr) +
-                                     " GAP: " + ("%.2f" % gap))
+                        logging.info(
+                            "training step "
+                            + str(global_step_val)
+                            + " | Loss: "
+                            + ("%.2f" % loss_val)
+                            + " Examples/sec: "
+                            + ("%.2f" % examples_per_second)
+                            + " | Hit@1: "
+                            + ("%.2f" % hit_at_one)
+                            + " PERR: "
+                            + ("%.2f" % perr)
+                            + " GAP: "
+                            + ("%.2f" % gap)
+                            + " EVAL time mins: "
+                            + ("%.1f" % eval_time / 60.0)
+                        )
 
                         sv.summary_writer.add_summary(
                             utils.MakeSummary("model/Training_Hit@1", hit_at_one),
-                            global_step_val)
+                            global_step_val,
+                        )
                         sv.summary_writer.add_summary(
-                            utils.MakeSummary("model/Training_Perr", perr), global_step_val)
+                            utils.MakeSummary("model/Training_Perr", perr),
+                            global_step_val,
+                        )
                         sv.summary_writer.add_summary(
-                            utils.MakeSummary("model/Training_GAP", gap), global_step_val)
+                            utils.MakeSummary("model/Training_GAP", gap),
+                            global_step_val,
+                        )
                         sv.summary_writer.add_summary(
-                            utils.MakeSummary("global_step/Examples/Second",
-                                              examples_per_second), global_step_val)
+                            utils.MakeSummary(
+                                "global_step/Examples/Second", examples_per_second
+                            ),
+                            global_step_val,
+                        )
                         sv.summary_writer.flush()
 
                         # Exporting the model every x steps
-                        time_to_export = ((self.last_model_export_step == 0) or
-                                          (global_step_val - self.last_model_export_step
-                                           >= self.export_model_steps))
+                        time_to_export = (self.last_model_export_step == 0) or (
+                            global_step_val - self.last_model_export_step
+                            >= self.export_model_steps
+                        )
 
                         if self.is_master and time_to_export:
-                            self.export_model(global_step_val, sv.saver, sv.save_path, sess)
+                            self.export_model(
+                                global_step_val, sv.saver, sv.save_path, sess
+                            )
                             self.last_model_export_step = global_step_val
                     else:
-                        logging.info("training step " + str(global_step_val) + " | Loss: " +
-                                     ("%.2f" % loss_val) + " Examples/sec: " + ("%.2f" % examples_per_second))
+                        logging.info(
+                            "training step "
+                            + str(global_step_val)
+                            + " | Loss: "
+                            + ("%.2f" % loss_val)
+                            + " Examples/sec: "
+                            + ("%.2f" % examples_per_second)
+                        )
             except tf.errors.OutOfRangeError:
-                logging.info("%s: Done training -- epoch limit reached.",
-                             task_as_string(self.task))
+                logging.info(
+                    "%s: Done training -- epoch limit reached.",
+                    task_as_string(self.task),
+                )
 
         logging.info("%s: Exited training loop.", task_as_string(self.task))
         sv.Stop()
@@ -515,26 +624,35 @@ class Trainer(object):
         last_checkpoint = saver.save(session, save_path, global_step_val)
 
         model_dir = "{0}/export/step_{1}".format(self.train_dir, global_step_val)
-        logging.info("%s: Exporting the model at step %s to %s.",
-                     task_as_string(self.task), global_step_val, model_dir)
+        logging.info(
+            "%s: Exporting the model at step %s to %s.",
+            task_as_string(self.task),
+            global_step_val,
+            model_dir,
+        )
 
         self.model_exporter.export_model(
             model_dir=model_dir,
             global_step_val=global_step_val,
-            last_checkpoint=last_checkpoint)
+            last_checkpoint=last_checkpoint,
+        )
 
     def start_server_if_distributed(self):
         """Starts a server if the execution is distributed."""
 
         if self.cluster:
-            logging.info("%s: Starting trainer within cluster %s.",
-                         task_as_string(self.task), self.cluster.as_dict())
+            logging.info(
+                "%s: Starting trainer within cluster %s.",
+                task_as_string(self.task),
+                self.cluster.as_dict(),
+            )
             server = start_server(self.cluster, self.task)
             target = server.target
             device_fn = tf.train.replica_device_setter(
                 ps_device="/job:ps",
                 worker_device="/job:%s/task:%d" % (self.task.type, self.task.index),
-                cluster=self.cluster)
+                cluster=self.cluster,
+            )
         else:
             target = ""
             device_fn = ""
@@ -544,38 +662,50 @@ class Trainer(object):
         """Removes the training directory."""
         try:
             logging.info(
-                "%s: Removing existing train directory.",
-                task_as_string(self.task))
+                "%s: Removing existing train directory.", task_as_string(self.task)
+            )
             gfile.DeleteRecursively(train_dir)
         except:
             logging.error(
-                "%s: Failed to delete directory " + train_dir +
-                " when starting a new model. Please delete it manually and" +
-                " try again.", task_as_string(self.task))
+                "%s: Failed to delete directory "
+                + train_dir
+                + " when starting a new model. Please delete it manually and"
+                + " try again.",
+                task_as_string(self.task),
+            )
 
     def get_meta_filename(self, start_new_model, train_dir):
         if start_new_model:
-            logging.info("%s: Flag 'start_new_model' is set. Building a new model.",
-                         task_as_string(self.task))
+            logging.info(
+                "%s: Flag 'start_new_model' is set. Building a new model.",
+                task_as_string(self.task),
+            )
             return None
 
         latest_checkpoint = tf.train.latest_checkpoint(train_dir)
         if not latest_checkpoint:
-            logging.info("%s: No checkpoint file found. Building a new model.",
-                         task_as_string(self.task))
+            logging.info(
+                "%s: No checkpoint file found. Building a new model.",
+                task_as_string(self.task),
+            )
             return None
 
         meta_filename = latest_checkpoint + ".meta"
         if not gfile.Exists(meta_filename):
-            logging.info("%s: No meta graph file found. Building a new model.",
-                         task_as_string(self.task))
+            logging.info(
+                "%s: No meta graph file found. Building a new model.",
+                task_as_string(self.task),
+            )
             return None
         else:
             return meta_filename
 
     def recover_model(self, meta_filename):
-        logging.info("%s: Restoring from meta graph file %s",
-                     task_as_string(self.task), meta_filename)
+        logging.info(
+            "%s: Restoring from meta graph file %s",
+            task_as_string(self.task),
+            meta_filename,
+        )
         return tf.train.import_meta_graph(meta_filename)
 
     def build_model(self, model, reader):
@@ -584,34 +714,41 @@ class Trainer(object):
         label_loss_fn = find_class_by_name(FLAGS.label_loss, [losses])()
         optimizer_class = find_class_by_name(FLAGS.optimizer, [tf.train])
 
-        build_graph(reader=reader,
-                    model=model,
-                    optimizer_class=optimizer_class,
-                    clip_gradient_norm=FLAGS.clip_gradient_norm,
-                    train_data_pattern=FLAGS.train_data_pattern,
-                    label_loss_fn=label_loss_fn,
-                    base_learning_rate=FLAGS.base_learning_rate,
-                    learning_rate_decay=FLAGS.learning_rate_decay,
-                    learning_rate_decay_examples=FLAGS.learning_rate_decay_examples,
-                    regularization_penalty=FLAGS.regularization_penalty,
-                    num_readers=FLAGS.num_readers,
-                    batch_size=FLAGS.batch_size,
-                    num_epochs=FLAGS.num_epochs)
+        build_graph(
+            reader=reader,
+            model=model,
+            optimizer_class=optimizer_class,
+            clip_gradient_norm=FLAGS.clip_gradient_norm,
+            train_data_pattern=FLAGS.train_data_pattern,
+            label_loss_fn=label_loss_fn,
+            base_learning_rate=FLAGS.base_learning_rate,
+            learning_rate_decay=FLAGS.learning_rate_decay,
+            learning_rate_decay_examples=FLAGS.learning_rate_decay_examples,
+            regularization_penalty=FLAGS.regularization_penalty,
+            num_readers=FLAGS.num_readers,
+            batch_size=FLAGS.batch_size,
+            num_epochs=FLAGS.num_epochs,
+        )
 
-        return tf.train.Saver(max_to_keep=5, keep_checkpoint_every_n_hours=1.)
+        return tf.train.Saver(max_to_keep=5, keep_checkpoint_every_n_hours=0.25)
 
 
 def get_reader():
     # Convert feature_names and feature_sizes to lists of values.
     feature_names, feature_sizes = utils.GetListOfFeatureNamesAndSizes(
-        FLAGS.feature_names, FLAGS.feature_sizes)
+        FLAGS.feature_names, FLAGS.feature_sizes
+    )
 
     if FLAGS.frame_features:
         reader = readers.YT8MFrameFeatureReader(
-            feature_names=feature_names, feature_sizes=feature_sizes)
+            feature_names=feature_names,
+            feature_sizes=feature_sizes,
+            segment_labels=FLAGS.segment_labels,
+        )
     else:
         reader = readers.YT8MAggregatedFeatureReader(
-            feature_names=feature_names, feature_sizes=feature_sizes)
+            feature_names=feature_names, feature_sizes=feature_sizes
+        )
 
     return reader
 
@@ -634,8 +771,11 @@ class ParameterServer(object):
     def run(self):
         """Starts the parameter server."""
 
-        logging.info("%s: Starting parameter server within cluster %s.",
-                     task_as_string(self.task), self.cluster.as_dict())
+        logging.info(
+            "%s: Starting parameter server within cluster %s.",
+            task_as_string(self.task),
+            self.cluster.as_dict(),
+        )
         server = start_server(self.cluster, self.task)
         server.join()
 
@@ -650,18 +790,17 @@ def start_server(cluster, task):
     """
 
     if not task.type:
-        raise ValueError("%s: The task type must be specified." %
-                         task_as_string(task))
+        raise ValueError("%s: The task type must be specified." % task_as_string(task))
     if task.index is None:
-        raise ValueError("%s: The task index must be specified." %
-                         task_as_string(task))
+        raise ValueError("%s: The task index must be specified." % task_as_string(task))
 
     # Create and start a server.
     return tf.train.Server(
         tf.train.ClusterSpec(cluster),
         protocol="grpc",
         job_name=task.type,
-        task_index=task.index)
+        task_index=task.index,
+    )
 
 
 def task_as_string(task):
@@ -671,6 +810,7 @@ def task_as_string(task):
 def main(unused_argv):
     # Load the environment.
     env = json.loads(os.environ.get("TF_CONFIG", "{}"))
+    os.environ["TF_ENABLE_AUTO_MIXED_PRECISION"] = "1"
 
     # Load the cluster data from the environment.
     cluster_data = env.get("cluster", None)
@@ -682,30 +822,38 @@ def main(unused_argv):
 
     # Logging the version.
     logging.set_verbosity(tf.logging.INFO)
-    logging.info("%s: Tensorflow version: %s.",
-                 task_as_string(task), tf.__version__)
+    logging.info("%s: Tensorflow version: %s.", task_as_string(task), tf.__version__)
 
     # Dispatch to a master, a worker, or a parameter server.
     if not cluster or task.type == "master" or task.type == "worker":
-        model = find_class_by_name(FLAGS.model,
-                                   [frame_level_models, video_level_models, nextvlad])()
+        model = find_class_by_name(
+            FLAGS.model, [frame_level_models, video_level_models, nextvlad]
+        )()
 
         reader = get_reader()
 
         model_exporter = export_model.ModelExporter(
-            frame_features=FLAGS.frame_features,
-            model=model,
-            reader=reader)
+            frame_features=FLAGS.frame_features, model=model, reader=reader
+        )
 
-        Trainer(cluster, task, FLAGS.train_dir, model, reader, model_exporter,
-                FLAGS.log_device_placement, FLAGS.max_steps,
-                FLAGS.export_model_steps).run(start_new_model=FLAGS.start_new_model)
+        Trainer(
+            cluster,
+            task,
+            FLAGS.train_dir,
+            model,
+            reader,
+            model_exporter,
+            FLAGS.log_device_placement,
+            FLAGS.max_steps,
+            FLAGS.export_model_steps,
+        ).run(start_new_model=FLAGS.start_new_model)
 
     elif task.type == "ps":
         ParameterServer(cluster, task).run()
     else:
-        raise ValueError("%s: Invalid task_type: %s." %
-                         (task_as_string(task), task.type))
+        raise ValueError(
+            "%s: Invalid task_type: %s." % (task_as_string(task), task.type)
+        )
 
 
 if __name__ == "__main__":
