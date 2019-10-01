@@ -167,7 +167,8 @@ class NeXtVLADModel(models.BaseModel):
                 model_input, num_frames, iterations
             )
 
-        # mask = tf.sequence_mask(num_frames, 300, dtype=tf.float32)
+        # mask = tf.sequence_mask(num_frames, 30, dtype=tf.float32)
+        mask = None
         max_frames = model_input.get_shape().as_list()[1]
         feature_size = model_input.get_shape().as_list()[2]
         reshaped_input = tf.reshape(model_input, [-1, feature_size])

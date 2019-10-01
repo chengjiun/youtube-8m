@@ -63,6 +63,14 @@ if __name__ == "__main__":
         "features. The model must also be set appropriately (i.e. to read 3D "
         "batches VS 4D batches.",
     )
+    flags.DEFINE_bool(
+        "segment_labels",
+        False,
+        "If set, then --train_data_pattern must be frame-level features (but with"
+        " segment_labels). Otherwise, --train_data_pattern must be aggregated "
+        "video-level features. The model must also be set appropriately (i.e. to "
+        "read 3D batches VS 4D batches.",
+    )
     flags.DEFINE_string(
         "model",
         "LogisticModel",
@@ -136,6 +144,7 @@ if __name__ == "__main__":
         "Whether to write the device on which every op will run into the "
         "logs on startup.",
     )
+    print(FLAGS)
 
 
 def validate_class_name(flag_value, category, modules, expected_superclass):
@@ -563,7 +572,7 @@ class Trainer(object):
                             + " GAP: "
                             + ("%.2f" % gap)
                             + " EVAL time mins: "
-                            + ("%.1f" % eval_time / 60.0)
+                            + ("%.1f" % (eval_time / 60.0))
                         )
 
                         sv.summary_writer.add_summary(
