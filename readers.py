@@ -285,8 +285,7 @@ class YT8MFrameFeatureReader(BaseReader):
             )
             if num_frames == -1:
                 num_frames = num_frames_in_this_feature
-            else:
-                tf.assert_equal(num_frames, num_frames_in_this_feature)
+
             feature_matrices[feature_index] = feature_matrix
 
         # cap the number of frames at self.max_frames
